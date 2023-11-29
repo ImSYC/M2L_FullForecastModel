@@ -1,13 +1,15 @@
 #Setting Work Directory
 setwd("F:/shiyuan/M2L_FullForecastModel/M2L_FullForecastModel/")
+
+#Calling the load packages script
+source("load_package.R")
+source("process_data.R")
+
 #Setting Output path
 outputpath <- file.path("./R_Output", format(Sys.Date(), "%Y-%m"), floor_date(today(), unit= "week"))
 dir.create(outputpath, recursive = TRUE)
 
 
-#Calling the load packages script
-source("load_package.R")
-source("process_data.R")
 
 ################################################################################
 #Removing Duplicate KFIs
@@ -50,7 +52,41 @@ rownames(KFIRates) <- format(Past_Mondays[1:(length(Past_Mondays)-1)], "%Y/%m/%d
 KFIRates <- as.data.frame(KFIRates[rev(rownames(KFIRates)), ])
 
 ################################################################################
+################################################################################
+AppL <- 8
+Past_Mondays <- seq(floor_date(today(), unit = "week") + 1 - 7 * AppL, floor_date(today(), unit = "week") + 1, by = "week")
 
+# Initialize a list to store the results
+AppRates_LoanPurpose <- list()
+
+# Loop over Divisions
+for (i in 1:length(Divisions)){
+  div <- Divisions[i]
+  
+  # Create an empty dataframe to store the results for this Division
+  division_df <- data.frame(Week = rev(Past_Mondays[1:AppL]))
+  
+  for(j in 1:length(LoanPurpose)){
+    lp <- LoanPurpose[j]
+    Apps1 <- AllCases %>% 
+      filter(Division == div & LoanPurpose == lp)
+    
+    # Calculate loan sums for each week
+    loan_sums <- sapply(seq_along(Past_Mondays[1:AppL]), function(k) {
+      Apps2 <- Apps1 %>% filter(ApplicationDate >= Past_Mondays[k] & ApplicationDate <  Past_Mondays[k + 1])
+      sum(Apps2$LoanAmount)
+    })
+    
+    # Add a column to the dataframe for this loan purpose
+    division_df[lp] <- rev(loan_sums)
+  }
+  
+  # Add the dataframe for this Division to the list
+  AppRates_LoanPurpose[[div]] <- division_df
+}
+
+
+################################################################################
 #Monitor for Apex KFIs
 #Creating a table specific for Apex
 Apex_KFI <- Recent_KFIs %>% 
@@ -77,4 +113,11 @@ addWorksheet(wb3, "KFIs")
 addWorksheet(wb3, "Apex")
 writeData(wb3, "KFIs", KFIRates, startRow = 1, colNames = TRUE, rowNames = TRUE)
 writeData(wb3, "Apex", Apex_KFI, startRow = 1, colNames = TRUE, rowNames = TRUE)
+addWorksheet(wb3, "Apps -> ")
+# Loop through each Division and add a worksheet for it
+for (div in Divisions) {
+  division_df <- AppRates_LoanPurpose[[div]]
+  addWorksheet(wb3, div)
+  writeData(wb3, div, division_df, startRow = 1, colNames = TRUE, rowNames = FALSE)
+}
 saveWorkbook(wb3, file.path(outputpath, outputfilename), overwrite = TRUE)

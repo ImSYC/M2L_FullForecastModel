@@ -204,6 +204,7 @@ AllCases <- AllCases %>%
                           age(App2DOB, AgeCalcDate),
                           NA)) %>%
   mutate(YoungestAppAge = pmin(App1Age, App2Age, na.rm = TRUE)) %>%
+  mutate(OldestAppAge = pmax(App1Age, App2Age, na.rm = TRUE)) %>%
   mutate(CalculatedLTV = ifelse(YoungestAppAge < 54 | CommittedFacility / EstimatedPropertyValue >= 0.7,
                                 NA,
                                 CommittedFacility / EstimatedPropertyValue))
