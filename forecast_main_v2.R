@@ -169,7 +169,7 @@ Fit_Distribution <- function(data){
 }
 
 ################################################################################
-#The dataframe All will refer to all applications that have occurred in the past 12 months.
+#The dataframe "All" will refer to all applications that have occurred in the past 12 months.
 #This will be the bases for our analysis.
 
 All <- AllCases %>% filter(ApplicationDate >= (today() %m+% months(-12)))
@@ -177,51 +177,258 @@ All <- AllCases %>% filter(ApplicationDate >= (today() %m+% months(-12)))
 #Fitting the distribution for all applications over the past 12 months
 Fit_Distribution(All)
 
-#Investigating the conversion rates
-#Samples used
 
-Sample_Exits          <- All %>% filter(DPRStatus %in% ExitCon)
-Sample_Offers         <- Sample_Exits[!is.na(Sample_Exits$OfferIssuedDate), ]
-Sample_A2C            <- Sample_Exits %>% filter(DPRStatus %in% CompCon)
-Sample_A2F            <- Sample_Exits %>% filter(DPRStatus %in% FailCon)
-Sample_O2F            <- Sample_A2F[!is.na(Sample_A2F$OfferIssuedDate),]
+################################################################################
 
-#Total Loan Value by funder under each sample
-TotalLoanValue_Exits  <- aggregate(LoanAmount~Division, data = Sample_Exits, sum)
-TotalLoanValue_Comp   <- aggregate(LoanAmount~Division, data = Sample_A2C, sum)
-TotalLoanValue_Fail   <- aggregate(LoanAmount~Division, data = Sample_A2F, sum)
-TotalLoanValue_Offers <- aggregate(LoanAmount~Division, data = Sample_Offers, sum)
+Sample_Exits <- All %>%
+  filter (DPRStatus %in$% ExitCon) %>%
+  mutate(PurposeType = ifelse(LoanPurpose == "Drawdown", "Drawdown", "Other")) %>%
+  filter (!Division == "Unknown")
 
-TotalLoanValue_Exits  <- TotalLoanValue_Exits  %>% filter(!Division == "Unknown")
-TotalLoanValue_Comp   <- TotalLoanValue_Comp   %>% filter(!Division == "Unknown")
-TotalLoanValue_Fail   <- TotalLoanValue_Fail   %>% filter(!Division == "Unknown")
-TotalLoanValue_Offers <- TotalLoanValue_Offers %>% filter(!Division == "Unknown")
+Divisions <- SampelExits$Division
 
-
-#Simple check, 
-#loan value in exits should be Completions + App to Failure
-#loan value in offers should be Completions + Offer to Failure
-round(TotalLoanValue_Exits[, 2], 0) == round(TotalLoanValue_Comp[,2] + TotalLoanValue_Fail[, 2])
-
-
-#Generating the conversion rates
-#Divisions <- TotalLoanValue_Comp$Division
-Divisions <- c("PA", "PG01", "PGSL","RGA1", "RL01", "UL01", "TAMI1")
+LoanPurpose <- c("All", unique(Sample_Exits$PurposeType))
+JourneyType <- c("A2C", "O2C")
 
 Conversion <- list()
-for (Division in Divisions){
-  Conversion[["A2C"]][[Division]] <- TotalLoanValue_Comp[match(Division, TotalLoanValue_Comp[,1]),2] / TotalLoanValue_Exits[match(Division, TotalLoanValue_Comp[,1]),2]
+for(div in divisions){
+  
+
+  Sample_Exits <- Sample_Exits %>% filter (Division == div)
+  
+  for (lp in LoanPurpose){
+    
+    if(!lp == "All"){
+      Sample_Exits <- Sample_Exits %>% filter (PurposeType == lp)
+    }
+    
+    #Samples used
+    Sample_Offers         <- Sample_Exits[!is.na(Sample_Exits$OfferIssuedDate), ]
+    Sample_A2C            <- Sample_Exits %>% filter(DPRStatus %in% CompCon)
+    Sample_A2F            <- Sample_Exits %>% filter(DPRStatus %in% FailCon)
+    Sample_O2F            <- Sample_A2F[!is.na(Sample_A2F$OfferIssuedDate),]
+    
+    #Total Loan Value by funder under each sample
+    TotalLoanValue_Exits  <- sum(Sample_Exits$LoanAmount)
+    TotalLoanValue_Comp   <- sum(Sample_A2C$LoanAmount)
+    TotalLoanValue_Fail   <- sum(Sample_A2F$LoanAmount)
+    TotalLoanValue_Offers <- sum(Sample_Offers$LoanAmount)
+    
+    for (jt in JourneyType){
+      if(jt == "O2C"){
+        
+        Conversion[[lp]][[jt]][[div]] <- TotalLoanValue_Comp / TotalLoanValue_Offers 
+        
+      } else {
+        
+        Conversion[[lp]][[jt]][[div]] <- TotalLoanValue_Comp / TotalLoanValue_Exits 
+        
+      }
+    }
+    
+  }
+  
 }
-for (Division in Divisions){
-  Conversion[["O2C"]][[Division]] <- TotalLoanValue_Comp[match(Division, TotalLoanValue_Comp[,1]),2] / TotalLoanValue_Offers[match(Division, TotalLoanValue_Comp[,1]),2]
-}
 
-
-#Conversion rate assumptions for 777 are replaced with the average of Phoenix and Rothesay offerings.
-Conversion[["A2C"]][["TAMI1"]] <- (((Conversion[["A2C"]][["PG01"]]) + (Conversion[["A2C"]][["PGSL"]]) + (Conversion[["A2C"]][["RL01"]]))/3 )
-Conversion[["O2C"]][["TAMI1"]] <- (((Conversion[["O2C"]][["PG01"]]) + (Conversion[["O2C"]][["PGSL"]]) + (Conversion[["O2C"]][["RL01"]]))/3 )
-
-
-Conversion_Mat <- data.frame(A2C = unlist(Conversion[["A2C"]]), 
-                             O2C = unlist(Conversion[["O2C"]]),
+Conversion_Mat <- data.frame(A2C = unlist(Conversion[["All"]][["A2C"]]), 
+                             O2C = unlist(Conversion[["All"]][["O2C"]]),
                              row.names = Divisions)
+
+Conversion_Mat_Full <- data.frame(A2C_DD = unlist(Conversion[["Drawdown"]][["A2C"]]), 
+                                  O2C_DD = unlist(Conversion[["Drawdown"]][["O2C"]]),
+                                  A2C_nonDD = unlist(Conversion[["Other"]][["A2C"]]), 
+                                  O2C_nonDD = unlist(Conversion[["Other"]][["O2C"]]),
+                                  row.names = Divisions)
+
+################################################################################
+#Historic App Rates
+#Observation period = 8 weeks
+AppL <- 8
+Past_Mondays <- seq(floor_date(today(), unit = "week") + 1 - 7 * AppL, floor_date(today(), unit = "week") + 1, by = "week")
+
+#Finding the KFIs and Apps of DD and nonDD over the past period.
+
+KFIRates_nonDD <- sapply(Divisions, function(div) {
+  KFI1 <- Recent_KFIs %>% filter(Division == div & !LoanPurpose == Drawdown)
+  sapply(seq_along(Past_Mondays[1:(length(Past_Mondays)-1)]), function(j) {
+    KFI2 <- KFI1 %>% filter(KFIDate >= Past_Mondays[j] & KFIDate <  Past_Mondays[j + 1])
+    sum(KFI2$LoanAmount)
+  })
+})
+
+KFIRates_nDD <- sapply(Divisions, function(div) {
+  KFI1 <- Recent_KFIs %>% filter(Division == div & LoanPurpose == Drawdown)
+  sapply(seq_along(Past_Mondays[1:(length(Past_Mondays)-1)]), function(j) {
+    KFI2 <- KFI1 %>% filter(KFIDate >= Past_Mondays[j] & KFIDate <  Past_Mondays[j + 1])
+    sum(KFI2$LoanAmount)
+  })
+})
+
+AppRates_nonDD <- sapply(Divisions, function(div) {
+  App1 <- Recent_Apps %>% filter(Division == div & !LoanPurpose == Drawdown)
+  sapply(seq_along(Past_Mondays[1:(length(Past_Mondays)-1)]), function(j) {
+    App2 <- App1 %>% filter(ApplicationDate >= Past_Mondays[j] & ApplicationDate <  Past_Mondays[j + 1])
+    sum(App2$LoanAmount)
+  })
+})
+
+AppRates_nDD <- sapply(Divisions, function(div) {
+  App1 <- Recent_Apps %>% filter(Division == div & LoanPurpose == Drawdown)
+  sapply(seq_along(Past_Mondays[1:(length(Past_Mondays)-1)]), function(j) {
+    App2 <- App1 %>% filter(ApplicationDate >= Past_Mondays[j] & ApplicationDate <  Past_Mondays[j + 1])
+    sum(App2$LoanAmount)
+  })
+})
+
+
+################################################################################
+#Finding the product composition so that we can then forecast product level new business.
+#The composition will be used to provide a recommendation, after which we can apply some manual input on what is likely to happen.
+Product_Composition_Summary <- AllCases %>%
+  filter(ApplicationDate >= (today() - 45)) %>%
+  group_by(Division, ProductNameClean) %>%
+  summarise(LoanAmount = sum(LoanAmount)) %>%
+  #summarise(TotalLoanAmount = sum(LoanAmount), .groups = "drop") %>%
+  group_by(Division) %>%
+  mutate(Composition = LoanAmount / sum(LoanAmount))
+
+################################################################################
+#Completions data table
+
+A <- AllCases %>%
+  filter(CompletionDate >= pmin(floor_date(today(), unit = "year"), today()-10),  # Filters for cases completed in the current year or later
+         DPRStatus %in% "Completed")  # Filters for cases with "Completed" DPRStatus
+
+# Summarize Loan Quantity and Loan Value
+A_LoanAmount_Summary <- A %>%
+  group_by(Division, ProductNameClean, LTVBand, LoanPurpose, CompMonth) %>%
+  summarize(LoanAmount = sum(LoanAmount))
+A_LoanCount_Summary <- A %>%
+  group_by(Division, ProductNameClean, LTVBand, LoanPurpose, CompMonth) %>%
+  summarize(LoanCount = n()) 
+
+A_LoanAmount <- A_LoanAmount_Summary %>%
+  spread(key = CompMonth, value = c("LoanAmount"), fill = 0)
+A_LoanCount <- A_LoanCount_Summary %>% 
+  spread(key = CompMonth, value = c("LoanCount"), fill = 0)
+
+################################################################################
+B <- AllCases %>%
+  filter(
+    StatusChangeDate >= today() - days(100),               # Filters cases with StatusChangeDate within the last 100 days
+    ApplicationDate >= today() - days(365),                # Filters cases with ApplicationDate within the last year
+    !is.na(ApplicationDate),                               # Filters out rows with NA in ApplicationDate
+    is.na(CompletionDate),                                 # Filters cases with NA in CompletionDate
+    !DPRStatus %in% ExitCon,                               # Filters out cases with DPRStatus in ExitCon
+    !Division %in% "Unknown"                               # Filters out cases with Division "Unknown"
+  )
+
+# Add a new column JourneyType based on OfferIssuedDate
+B$JourneyType <- ifelse(is.na(B$OfferIssuedDate), "A2C", "O2C")
+
+# Calculate TimeinPipeline based on JourneyType
+B$TimeinPipeline <- ifelse(B$JourneyType == "A2C",
+                           pmax(round(as.double(bizdays(B[,"ApplicationDate"], today(), 'Rmetrics/LONDON')), 0), 0),
+                           pmax(round(as.double(bizdays(B[, "OfferIssuedDate"], today(), 'Rmetrics/LONDON')), 0), 0))
+
+# Summarize Loan Quantity, Loan Value, and CaseSize
+B_Summary <- B %>%
+  group_by(Division, ProductNameClean, LTVBand, SolicitorType, LoanPurpose, KeyTier1, JourneyType, TimeinPipeline) %>%
+  summarise(
+    LoanAmount = sum(LoanAmount),
+    LoanCount = n(),
+    CaseSize = LoanAmount / LoanCount
+  )
+
+# Calculate ConditionalProbability using sapply
+B_Summary$ConditionalProbability <- sapply(1:nrow(B_Summary), function(x) {
+  lp <- B_Summary$LoanPurpose[x]
+  st <- B_Summary$SolicitorType[x]
+  dv <- B_Summary$Division[x]
+  tp <- B_Summary$TimeinPipeline[x] + 1
+  jc <- paste0(substr(B_Summary$JourneyType[x], 1, 2), "C")
+  jf <- paste0(substr(B_Summary$JourneyType[x], 1, 2), "F")
+  
+  alpha <- (1 - SubCDF[[lp]][[jc]][[st]][[tp]]) * Conversion[["All"]][[jc]][[dv]]
+  beta <- (1 - Conversion[["All"]][[jc]][[dv]]) * (1 - SubCDF[[lp]][[jf]][[st]][[tp]])
+  
+  if (length(alpha) == 0 || length(beta) == 0) {
+    result <- 0  # Assign a default value when there are missing results
+  } else {
+    result <- alpha / (alpha + beta)
+  }
+  
+  result
+})
+
+# Calculate ExpectedLoanAmount
+B_Summary$ExpectedLoanAmount <- B_Summary$ConditionalProbability * B_Summary$LoanAmount
+
+#Calculate the and define the deterministic probability of completion for pipeline cases
+Projection <- 500
+StartDate <- today()
+EndDate <- offset(today(), (Projection - 1), 'Rmetrics/LONDON')
+Pipeline_Sequence <- bizseq(StartDate, EndDate, 'Rmetrics/LONDON')
+Pipeline_Sequence_Floor <- format(floor_date(Pipeline_Sequence, unit = "month"), format = "%Y/%m/%d")
+Pipeline_Colnames <- format(seq(
+  from = floor_date(today(), unit = 'year'),
+  by = 'month',
+  length.out = (interval(StartDate, EndDate) %/% months(1) + 1),
+  format = "%Y/%m/%d"
+))
+
+results_matrix <- data.frame(matrix(0, nrow(B_Summary), Projection))
+
+foreach(i = 1:nrow(B_Summary)) %do% {
+  
+  lp <- B_Summary$LoanPurpose[i]
+  st <- B_Summary$SolicitorType[i]
+  dv <- B_Summary$Division[i]
+  tp <- B_Summary$TimeinPipeline[i] + 1
+  jc <- B_Summary$JourneyType[i]
+  el <- B_Summary$ExpectedLoanAmount[i]
+  
+  fit <- SubDistribution[[lp]][[jc]][[st]]
+  Parameters <- lapply(fit$parameters, function(x) fit[[x]])
+  p <- do.call(paste0("p", fit$family[1]), c(tp, Parameters))
+  
+  #P(X < t | X > a) = (F(X) - F(a)) / (1 - F(a))
+  #F(a) is presented here as p, also can be understood as P(X < a)
+  #F(X) is presented here as x, also can be understood as P(X < t)
+  #P(X < t | X > a) is denoted as B_PDF here.
+  x <- numeric(Projection)
+  for (j in 1:Projection){
+    # Calculate the B_PDF values for each day and store them in B_ExpectedCompletions
+    x[j] <- do.call(paste0("p", fit$family[1]), c((tp + j), Parameters))
+  }
+  
+  #x <- round(x, digits = 10)
+  B_CDF <- (x - p) / (1 - p)
+  #Calculating the probability of completion for each business day from the present
+  B_interval_CDF <- c(B_CDF[1], diff(B_CDF))
+  B_ExpectedCompletions <- B_interval_CDF * el
+  B_ExpectedCompletions <- round(B_ExpectedCompletions, digits = 2)
+  
+  results_matrix[i,] <- B_ExpectedCompletions
+  
+}
+
+#Naming the column according to the day we expect the completion to occur
+colnames(results_matrix) <- as.Date(Pipeline_Sequence)
+B_Summary <- cbind.data.frame(B_Summary, results_matrix)
+
+# Add results_matrix to B_Summary
+#B_Aggregate <- cbind.data.frame(B_Summary, results_matrix)
+
+# Create B_Aggregate by summing results_matrix by Division
+B_Aggregate <- cbind.data.frame(B_Summary$Division, results_matrix)
+names(B_Aggregate)[1] <- "Division"
+B_Aggregate <- rowsum(B_Aggregate[, -1], B_Aggregate[, 1], na.rm = TRUE)
+B_Aggregate <- cbind.data.frame(rownames(B_Aggregate), B_Aggregate)
+names(B_Aggregate)[1] <- "Division"
+
+
+
+
+
+
