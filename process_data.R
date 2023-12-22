@@ -96,8 +96,10 @@ AllCases[["A2C"]] <- as.double(bizdays(AllCases[["ApplicationDate"]], AllCases[[
 AllCases[["A2C"]][AllCases[["A2C"]] < 0] <- 0
 AllCases[["O2C"]] <- as.double(bizdays(AllCases[["OfferIssuedDate"]], AllCases[["CompletionDate"]], 'Rmetrics/LONDON'))
 AllCases[["O2C"]][AllCases[["O2C"]] < 0] <- 0
-AllCases[["AppMonth"]]  <- month(AllCases[["ApplicationDate"]])
-AllCases[["CompMonth"]] <- month(AllCases[["CompletionDate"]])
+#AllCases[["AppMonth"]]  <- month(AllCases[["ApplicationDate"]])
+AllCases <- AllCases %>% 
+  mutate(CompMonth = as.numeric(format(CompletionDate, "%m"))) %>%
+  mutate(AppMonth = as.numeric(format(ApplicationDate, "%m")))
 
 
 #Mapping KeyTier1Other
